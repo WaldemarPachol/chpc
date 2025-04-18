@@ -168,7 +168,7 @@
   - lack of start handling
   - added buffer charging procedure
 
-  v1.8W 15 sep 2023: (Waldek)
+  v1.9W 10 Apr 2023: (Waldek)
   - easy MENU (like XD old Nokia 3310)
 
   //TODO:
@@ -304,7 +304,7 @@
 
 */
 
-String fw_version = "1.8W";
+String fw_version = "1.9W";
 
 #ifdef DISPLAY_096
 #define DISPLAY DISPLAY_096
@@ -1420,10 +1420,16 @@ void eevise(void) {
       EEV_cur_pos++;
       EEV_cur_step++;
       EEV_apulses--;
+    } else if (EEV_apulses > 0 && EEV_cur_pos + 1 > EEV_MAXPULSES) {
+      EEV_apulses = 0; // zabezpieczenie: osiągnięto maksimum
+      // PrintS_and_D("EEmax!");
     } else if (EEV_apulses < 0 && (EEV_cur_pos - 1 >= EEV_MINWORKPOS || EEV_adonotcare)) {
       EEV_cur_pos--;
       EEV_cur_step--;
       EEV_apulses++;
+    } else if (EEV_apulses < 0 && !(EEV_cur_pos - 1 >= EEV_MINWORKPOS || EEV_adonotcare)) {
+      EEV_apulses = 0; // zabezpieczenie: osiągnięto minimum
+      // PrintS_and_D("EEmin!");
     }
 
     EEV_cur_step = (EEV_cur_step + 8) % 8;
