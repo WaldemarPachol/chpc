@@ -52,6 +52,12 @@ Controlled via both RS-485 and 16x2 display with buttons.
   - overload error handling
   - lack of start handling
   - added buffer charging procedure
+- 10 Apr 2023: version 1.9w released (Waldek)
+  - easy MENU (like XD old Nokia 3310)
+- 16 Aug 2025: version 2.0w relased (Waldek)
+  - eevise procedure rewritten
+  - DHW and buffer handling added to the menu, as well as a procedure for manual resetting of the heat pump/errors
+  - corrections of several minor bugs
 <br><br>
 ## Applications:
 | Usage. |	Brief description. | 	Application examples	| Available protections	|
@@ -131,7 +137,7 @@ These abbreviations used in the interface during sensors installation procedure
 | Tac | after condenser |          |
 | Touter | outer (outdoor) |          |
 | Tcwu | domestic hot water tank |          |
-| Ts2 | additional sensor2 |          |
+| Ts2 | additional sensor2 | Buffer         |
 
 <br><br>
  ## Photos:<br>
