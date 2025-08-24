@@ -36,9 +36,13 @@
 #define RS485_HUMAN             2
 //#define RS485_NONE            3
 
-#define INVERTER_COMPRESOR                  //For inverter compressors, for on/off compressors comment this
-#define CWU_SUPPORT                         //Domestic hot water tank
-#define BUFFER_SUPPORT                      //Heat buffer tank for central heating. Charged based on two temperature sensors Ttarget (top of buffer) and Ts2 (bottom of buffer).
+//#define INVERTER_COMPRESOR                  //For inverter compressors, for on/off compressors comment this
+
+#define CWU_SUPPORT                         // !!!!! MOVED TO MENU !!!!!
+                                            //Domestic hot water tank
+                                            
+#define BUFFER_SUPPORT                      // !!!!! MOVED TO MENU !!!!!
+                                            //Heat buffer tank for central heating. Charged based on two temperature sensors Ttarget (top of buffer) and Ts2 (bottom of buffer).
                                             //Charging is done in a cyclic manner, i.e. the heat pump will be turned on when Ttarget<T_setpoint,
                                             //and the heat pump will be turned off if Ts2>T_setpoint
 
@@ -81,17 +85,17 @@
 #define EEV_MAXPULSES           500
 
 #define EEV_PULSE_FCLOSE_MILLIS 20          //fast close, set waiting pos., close on danger
-#define EEV_PULSE_CLOSE_MILLIS  6000       //precise close         //zmiana z 50000 
+#define EEV_PULSE_CLOSE_MILLIS  4000        //precise close         //zmiana z 50000 
 #define EEV_PULSE_WOPEN_MILLIS  20          //waiting pos. set
-#define EEV_PULSE_FOPEN_MILLIS  2500        //fast open, fast search //zmiana z 1300
-#define EEV_PULSE_OPEN_MILLIS   10000       //precise open          //zmiana z 60000
+#define EEV_PULSE_FOPEN_MILLIS  1000        //fast open, fast search //zmiana z 1300
+#define EEV_PULSE_OPEN_MILLIS   7000       //precise open          //zmiana z 60000
 
 #define EEV_STOP_HOLD           500       //0.1..1sec for Sanhua
 #define EEV_CLOSE_ADD_PULSES    8         //read below, close algo
-#define EEV_OPEN_AFTER_CLOSE    40        //0 - close to zero position, than close on EEV_CLOSE_ADD_PULSES (close insurance, read EEV manuals for this value)
+#define EEV_OPEN_AFTER_CLOSE    50       //0 - close to zero position, than close on EEV_CLOSE_ADD_PULSES (close insurance, read EEV manuals for this value)
 //N - close to zero position, than close on EEV_CLOSE_ADD_PULSES, than open on EEV_OPEN_AFTER_CLOSE pulses
 //i.e. it is "waiting position" while HP not working
-#define EEV_MINWORKPOS          50        //position will be not less during normal work, set after compressor start
+#define EEV_MINWORKPOS          70       //position will be not less during normal work, set after compressor start
 #define EEV_PRECISE_START       8.6       //T difference, threshold: make slower pulses if (real_diff-target_diff) less than this value. Used for fine auto-tuning.     //zmiana z 8.6
 #define EEV_EMERG_DIFF          3.5       //zmiana z 2.5     //if dangerous condition:  real_diff =< (target_diff - EEV_EMERG_DIFF) occured then EEV will be closed to min. work position //Ex: EEV_EMERG_DIFF = 2.0, target diff 5.0, if real_diff =< (5.0 - 2.0) than EEV will be closed
 #define EEV_HYSTERESIS          0.6       //must be less than EEV_PRECISE_START, ex: target difference = 4.0, hysteresis = 0.1, when difference in range 4.0..4.1 no EEV pulses will be done; 
@@ -171,9 +175,14 @@
   v1.9W 10 Apr 2023: (Waldek)
   - easy MENU (like XD old Nokia 3310)
 
+  v2.0w 16 Aug 2025: (Waldek)
+  - eevise procedure rewritten
+  - DHW and buffer handling added to the menu, as well as a procedure for manual resetting of the heat pump/errors
+  - corrections of several minor bugs
+
   //TODO:
   * In the cooling mode “Hot WP” must be turned on non-stop. 
-  * establish the procedure for going from cooling to DHW heating (compressor stop, pause 60 seconds, switch the four-way valve and DHW, pause 60 seconds, start the compressor). The same in the other direction.
+  * (done) establish the procedure for going from cooling to DHW heating (compressor stop, pause 60 seconds, switch the four-way valve and DHW, pause 60 seconds, start the compressor). The same in the other direction.
   - 1604 display support
   - 0.0 to -127 fix: only 2 attempts than pass 0.0
   - poss. DoS: infinite read to nowhere, fix it, set finite counter (ex: 200)
@@ -182,14 +191,14 @@
   - min_user_t/max_user_t to header
   - rs485_modbus
   - full relays halification
-  ? wclose and fclose to EEV
+  - ? wclose and fclose to EEV
   - liquid ref. protection: start cold circle and sump heater if tsump =< tco/tci+1, add option to header
   - periodical start of hot side circle
-  - valve_4way
+  - (done) valve_4way
   - inputs support
   - ? emergency jumper support
   - ? rewite re-init proc from MAGIC to emergency jumper removal at board start
-  - ? EEV target to EEPROM
+  - (done) ? EEV target to EEPROM
   - ? list T and other things on screen with buttons
   - ? EEV define maximum working position
   - ? few devices at same lane for RS485_HUMAN
@@ -304,7 +313,7 @@
 
 */
 
-String fw_version = "1.9W";
+String fw_version = "2.0W";
 
 #ifdef DISPLAY_096
 #define DISPLAY DISPLAY_096
@@ -373,9 +382,10 @@ String hw_version = "Type G v1.x";
 #define RELAY_SUMP_HEATER       10
 #define RELAY_4WAY_VALVE        11
 #ifdef INPUTS_AS_BUTTONS
-#define BUT_RIGHT   A3
-#define BUT_LEFT    A2
-#define BUT_MENU    A1
+#define BUT_RIGHT     A3
+#define BUT_LEFT      A2
+#define BUT_MENU      A1
+#define BUT_MENU_NEXT A0
 #endif
 #ifdef EEV_SUPPORT
 #define EEV_1   2
@@ -544,18 +554,22 @@ const double cT_hotout_max      = T_HOTOUT_MAX;
 //const double cT_workingOK_cold_delta_min = 0.5;   // 0.7 - 1st try, 2nd try 0.5
 //const double cT_workingOK_hot_delta_min = 0.5;
 const double cT_workingOK_sump_min  = T_WORKINGOK_SUMP_MIN;         //need to be not very high to normal start after deep freeze
-const double c_wattage_max    = MAX_WATTS;    //FUNAI: 1000W seems to be normal working wattage INCLUDING 1(one) CR25/4 at 3rd speed
+double c_wattage_max    = MAX_WATTS;    //FUNAI: 1000W seems to be normal working wattage INCLUDING 1(one) CR25/4 at 3rd speed
+double c_wattage_max_lastsaved    = c_wattage_max;
 //PH165X1CY : 920 Watts, 4.2 A
-const double c_workingOK_wattage_min  = c_wattage_max * 0.3;  // zmiana z 2.5
+double c_workingOK_wattage_min  = c_wattage_max * 0.3;  // zmiana z 2.5
 
 bool heatpump_state         = 0;
 bool hotside_circle_state   = 0;
 bool coldside_circle_state  = 0;
 bool sump_heater_state      = 0;
 bool valve4w_state          = 0;
-bool cwu_heating_state      = 0;  // Flaga aktywnego grzania CWU
-bool valve_cwu_position     = 0;  // Flaga pozycji zaworu (false = ogrzewanie domu, true = ogrzewanie CWU)
-bool work_mode_state        = 0;  // Flaga 0 - grzanie, 1 - chłodzenie
+bool work_mode_state        = 0;  // Flaga 0 - grzanie, 1 - chłodzenie + (grzanie CWU gdy DHW_support_state == 1)
+bool buffer_support_state   = 0;  // Flaga 0 - brak, 1 - zainstalowany
+bool DHW_support_state      = 0;  // Flaga 0 - brak, 1 - zainstalowany
+bool cwu_heating_state      = 0;  // Flaga grzania CWU: aktywne/nieaktywne
+bool valve_cwu_position     = 0;  // Flaga pozycji zaworu 3D (false = ogrzewanie domu, true = ogrzewanie CWU)
+bool HP_CH_state            = 0;  // 0 - Winter, 1 - Summer
 
 bool relay6_state   = 0;
 bool relay7_state   = 0;
@@ -624,6 +638,7 @@ char temp[10];
 int m = 0;
 int i = 0;
 int z = 0;
+int q = 0;
 int x = 0;
 int y = 0;
 double tempdouble = 0.0;
@@ -839,10 +854,8 @@ void _PrintHelp(void) {
   PrintS( "Oryginal CHPC, https://github.com/gonzho000/chpc/");
   PrintS( "Forked CHPC, https://github.com/WaldemarPachol/chpc fw: " + fw_version  + " board: " + hw_version);
   PrintS(F("Commands: \n (?) help\n (+) increase aim T\n (-) decrease aim T\n"));
-#ifdef  CWU_SUPPORT
   PrintS(F(" [(] increase aim T_CWU\n [)] decrease aim T_CWU\n"));
   PrintS(F(" [&] increase hysteresis T_CWU\n [*] decrease hysteresis T_CWU\n"));
-#endif
 #ifdef EEV_SUPPORT
   PrintS(F(" (<) decrease EEV T diff\n (>) increase EEV T diff\n"));
 #endif
@@ -888,7 +901,6 @@ int Dec_E (void) {    ///!!!!!! unprotected
   return 1;
 }
 
-#ifdef CWU_SUPPORT
 int Inc_T_cwu (void) {
   if (T_TARGET_CWU + 0.5 > 50.0) {
     PrintS_and_D(F("Max!"));
@@ -932,7 +944,6 @@ int Dec_T_hys (void) {
   PrintS_and_D_double(CWU_HYSTERESIS);
   return 1;
 }
-#endif
 
 void print_Serial_SaD (double num) {  //global string + double
   RS485Serial.print(outString);
@@ -991,17 +1002,23 @@ void PrintStats_Serial (void) {
     outString = "Touter: " ;
     print_Serial_SaD(Touter.T);
   }
-  #ifdef CWU_SUPPORT
-  if (Tcwu.e == 1)   {
-    outString = "Tcwu: "  ;
-    print_Serial_SaD(Tcwu.T);
-  }
-  #endif
+   if (DHW_support_state == 1) {
+      if (Tcwu.e == 1)   {
+        outString = "Tcwu: "  ;
+        print_Serial_SaD(Tcwu.T);
+      } 
+   }
   if (Ts2.e == 1)   {
     outString = "Ts2: "  ;
     print_Serial_SaD(Ts2.T);
   }
-  outString = "Err: " + String(errorcode) + "\n\rWatts:" + String(async_wattage) + "\n\rAim: "; print_Serial_SaD(T_setpoint);
+  outString = "Err: ";
+  print_Serial_SaD(errorcode);
+  outString = "Watts: ";
+  print_Serial_SaD(async_wattage);
+  outString = "Aim: "; 
+  print_Serial_SaD(T_setpoint);
+ 
 #ifdef EEV_SUPPORT
   outString = "EEV_pos:" + String (EEV_cur_pos);
   RS485Serial.print(outString);
@@ -1074,7 +1091,6 @@ void SaveDataEE(void) {
       WriteFloatEEPROM(eeprom_addr, T_setpoint_cooling);
       T_setpoint_cooling_lastsaved = T_setpoint_cooling;
     }
-    #ifdef CWU_SUPPORT
     if (T_TARGET_CWU_lastsaved != T_TARGET_CWU) {
       eeprom_addr = 0x09;
       WriteFloatEEPROM(eeprom_addr, T_TARGET_CWU);
@@ -1085,11 +1101,15 @@ void SaveDataEE(void) {
       WriteFloatEEPROM(eeprom_addr, CWU_HYSTERESIS);
       CWU_HYSTERESIS_lastsaved = CWU_HYSTERESIS;
     }
-    #endif
     if (T_EEV_setpoint_lastsaved != T_EEV_setpoint) {
       eeprom_addr = 0x15;
       WriteFloatEEPROM(eeprom_addr, T_EEV_setpoint);
       T_EEV_setpoint_lastsaved = T_EEV_setpoint;
+    }
+    if (c_wattage_max_lastsaved != c_wattage_max) {
+      eeprom_addr = 0x19;
+      WriteFloatEEPROM(eeprom_addr, c_wattage_max);
+      c_wattage_max_lastsaved = c_wattage_max;
     }
     millis_lasteesave = millis_now;
 #ifdef RS485_HUMAN
@@ -1396,54 +1416,60 @@ void halifise(void) {
 #endif
 }
 
-void eevise(void) {
-  unsigned long time_since_last_step = millis_now - millis_eev_last_step;
-  bool should_step = false;
+bool isTimeToStep() {
+  unsigned long elapsed = millis_now - millis_eev_last_step;
+  if (millis_eev_last_step == 0) return true;
 
-  if (EEV_apulses < 0) { // Zamykanie zaworu
-    if ((EEV_fast && time_since_last_step > EEV_PULSE_FCLOSE_MILLIS) ||
-        (!EEV_fast && time_since_last_step > EEV_PULSE_CLOSE_MILLIS)) {
-      should_step = true;
-    }
-  } else if (EEV_apulses > 0) { // Otwieranie zaworu
-    if ((EEV_cur_pos < EEV_MINWORKPOS && time_since_last_step > EEV_PULSE_WOPEN_MILLIS) ||
-        (EEV_cur_pos >= EEV_MINWORKPOS && EEV_fast && time_since_last_step > EEV_PULSE_FOPEN_MILLIS) ||
-        (EEV_cur_pos >= EEV_MINWORKPOS && !EEV_fast && time_since_last_step > EEV_PULSE_OPEN_MILLIS)) {
-      should_step = true;
-    }
-  } else if (millis_eev_last_step == 0) { // Pierwsze uruchomienie
-    should_step = true;
+  if (EEV_apulses < 0) {
+    return elapsed > (EEV_fast ? EEV_PULSE_FCLOSE_MILLIS : EEV_PULSE_CLOSE_MILLIS);
   }
 
-  if (should_step && EEV_apulses != 0) {
-    if (EEV_apulses > 0 && EEV_cur_pos + 1 <= EEV_MAXPULSES) {
-      EEV_cur_pos++;
-      EEV_cur_step++;
-      EEV_apulses--;
-    } else if (EEV_apulses > 0 && EEV_cur_pos + 1 > EEV_MAXPULSES) {
-      EEV_apulses = 0; // zabezpieczenie: osiągnięto maksimum
-      // PrintS_and_D("EEmax!");
-    } else if (EEV_apulses < 0 && (EEV_cur_pos - 1 >= EEV_MINWORKPOS || EEV_adonotcare)) {
-      EEV_cur_pos--;
-      EEV_cur_step--;
-      EEV_apulses++;
-    } else if (EEV_apulses < 0 && !(EEV_cur_pos - 1 >= EEV_MINWORKPOS || EEV_adonotcare)) {
-      EEV_apulses = 0; // zabezpieczenie: osiągnięto minimum
-      // PrintS_and_D("EEmin!");
+  if (EEV_apulses > 0) {
+    if (EEV_cur_pos < EEV_MINWORKPOS) {
+      return elapsed > EEV_PULSE_WOPEN_MILLIS;
     }
+    return elapsed > (EEV_fast ? EEV_PULSE_FOPEN_MILLIS : EEV_PULSE_OPEN_MILLIS);
+  }
 
-    EEV_cur_step = (EEV_cur_step + 8) % 8;
+  return false;
+}
 
-    on_EEV();
-    delay(50);
-    off_EEV();
+void stepEEV() {
+  if (EEV_apulses > 0 && EEV_cur_pos < EEV_MAXPULSES) {
+    EEV_cur_pos++;
+    EEV_cur_step++;
+    EEV_apulses--;
+  } else if (EEV_apulses < 0 && (EEV_cur_pos > EEV_MINWORKPOS || EEV_adonotcare)) {
+    EEV_cur_pos--;
+    EEV_cur_step--;
+    EEV_apulses++;
+  } else {
+    EEV_apulses = 0;
+  }
 
-    millis_eev_last_step = millis_now;
+  EEV_cur_step = (EEV_cur_step + 8) % 8;
+
+  on_EEV();
+  delay(50);
+  off_EEV();
+}
+
+void eevise() {
+  if (!isTimeToStep()) return;
+
+  if (EEV_apulses != 0) {
+    stepEEV();
   }
 
   if (EEV_cur_pos < 0) {
     EEV_cur_pos = 0;
   }
+
+  millis_eev_last_step = millis_now;
+
+  #ifdef EEV_DEBUG
+    PrintS(String(EEV_cur_pos));
+  #endif
 }
 
 //--------------------------- functions END
@@ -1612,7 +1638,7 @@ void setup(void) {
   pinMode   (BUT_LEFT, INPUT);
   //digitalWrite  (BUT_LEFT, LOW);
   pinMode   (BUT_MENU, INPUT);
-  //digitalWrite  (BUT_MENU, LOW);
+  pinMode   (BUT_MENU_NEXT, INPUT);
 #endif
 
   //EEPROM content:
@@ -1621,14 +1647,18 @@ void setup(void) {
   //0x05 .. 0x08  [T_setpoint_cooling]      Target value cooling, (wartość temperatury docelowej w pomieszczeniach na czujniku Ttarget)
   //0x09 .. 0x0c  [T_TARGET_CWU]            CWU Target value, (wartość temperatury docelowej na zbiorniku CWU na czujniku Tcwu)
   //0x0d .. 0x10  [CWU_HYSTERESIS]          CWU hysteresis, (wartość histerezy dla grzania CWU, = 2K)
-  //0x11 .. 0x14
-  //    0x11      Czy pompa ciepła posiada zawór rewersyjny 4-drogowy, 0 - nie, 1 - tak
+  //0x11 - 0x14
+  //    0x11      4 WAY reverse valve. Czy pompa ciepła posiada zawór rewersyjny 4-drogowy, 0 - nie, 1 - tak
   //    0x12      Work mode: Tryb pracy: Grzanie = 0, Chłodzenie = 1 (tylko jeśli 0x11 == 1)    // w przypadku działania trybu chłodzenia i konieczności nagrzania CWU, pompa ciepła musi się zatrzymać, odczekać 3 minuty, przełączyć się na „grzanie”, odczekać 3 minuty i start
-  //    0x13
-  //    0x14
+  //    0x13      Buffer support status: 0 - nie, 1 - tak (1 = endpoint for heating/cooling is Ts2)
+  //    0x14      CWU/DHW support status: 0 - nie, 1 - tak
   //0x15 .. 0x18  [T_EEV_setpoint]
-  //0x19 .. 0x1c
-  //0x1d .. 0x20
+  //0x19 .. 0x1c  [MAX_WATTS_value]
+  //0x1d - 0x20
+  //    0x1d      HP_CH_state:  0 - winter (central heating + DHW if enabled), 1 - summer (only DHW if enabled)
+  //    0x1e
+  //    0x1f
+  //    0x20  
   //0x21 .. 0x24
   //0x25 .. 0x28
   //0x29 .. 0x2c
@@ -1658,6 +1688,9 @@ void setup(void) {
 
     eeprom_addr = 0x15;
     T_EEV_setpoint_lastsaved = T_EEV_setpoint = ReadFloatEEPROM(eeprom_addr);
+
+    eeprom_addr = 0x19;
+    c_wattage_max_lastsaved = c_wattage_max = ReadFloatEEPROM(eeprom_addr);
 
     //PrintS_and_D("EEPROM->T " + String(T_setpoint));
 
@@ -1826,7 +1859,11 @@ void setup(void) {
     WriteFloatEEPROM(0x0d, CWU_HYSTERESIS);
     EEPROM.write(0x11, 0);                    // 0 - heat only (no 4way valve), 1 - heat/cooling (4way valve installed)
     EEPROM.write(0x12, 0);                    // 0 - heating mode
+    EEPROM.write(0x13, 0);                    // 0 - no buffer (buffer_support_status)
+    EEPROM.write(0x14, 0);                    // 0 - no DHW/CWU (CWU_support_status)
+    EEPROM.write(0x1d, 0);                    // 0 - Winter (HP_CH_state)
     WriteFloatEEPROM(0x15, T_EEV_setpoint);
+    WriteFloatEEPROM(0x19, MAX_WATTS);
     EEPROM.write(0x31, highByte(used_sensors));
     EEPROM.write(0x32, lowByte(used_sensors));
     ishuman -= 1;
@@ -1932,7 +1969,7 @@ void loop(void) {
   if ( heatpump_state == 1   &&  async_wattage > c_wattage_max  ) {
     if (  ((unsigned long)(millis_now - millis_last_heatpump_off) > POWERON_HIGHTIME )  ||  (async_wattage > c_wattage_max * 3)) {
 #ifdef RS485_HUMAN
-      PrintS(("Overload." + String(async_wattage)));
+      PrintS(("!!! Overload." + String(async_wattage)));
 #endif
       compressor_start_after = (unsigned long)(millis_now + 180000UL);   //ustawienie by pompa włączyła się za 3 minuty po wystąpieniu błędu Overload;
       heatpump_state = 0;
@@ -1961,77 +1998,111 @@ void loop(void) {
   z = digitalRead(BUT_LEFT);
   i = digitalRead(BUT_RIGHT);
   m = digitalRead(BUT_MENU);
-  if ( (z == 1) && ( i == 1) ) {
-    // errors reset
-  } else if (m == 1 || z == 1 || i == 1) {
+  q = digitalRead(BUT_MENU_NEXT);
+ uint8_t state = 255;
+    if (q == 1  &&  m != 1) {
+    menu_pos = (menu_pos + 1) % 14;
+  }
+  if ( (m == 1  &&  q != 1) || (z == 1  &&  i != 1) || (i == 1  &&  z != 1) || (q == 1  &&  m != 1) ) {
 #ifndef EEV_ONLY
       switch(menu_pos) {
         case 0:  //CH_target:
-          if ( z == 1 ) {
-            x = Dec_T();
-          }
-          if ( i == 1 ) {
-            x = Inc_T();
-          }
+          if (z == 1) x = Dec_T();
+          if (i == 1) x = Inc_T();
           PrintS_and_D("CH_target:" + String(T_setpoint));
           break;
         case 1:  //CH_hysteres:
           PrintS_and_D("CH_hysteres:00.0");
           break;
-        case 2:  //DHW_target:
-          if ( z == 1 ) {
-            x = Dec_T_cwu();
+        case 2:  //DHW_state:
+          {
+          if (z == 1) EEPROM.write(0x14, 0);
+          if (i == 1) EEPROM.write(0x14, 1);
+          String workMode = (EEPROM.read(0x14) == 0 ? "NO" : "YES");
+          PrintS_and_D("HP_DHW_state:" + workMode);
           }
-          if ( i == 1 ) {
-            x = Inc_T_cwu();
-          }
+          break;
+        case 3:  //DHW_target:
+          if (z == 1) x = Dec_T_cwu();
+          if (i == 1) x = Inc_T_cwu();
           PrintS_and_D("DHW_target:" + String(T_TARGET_CWU));
           break;
-        case 3:  //DHW_hysteres:
-          if ( z == 1 ) {
-            x = Dec_T_hys();
-          }
-          if ( i == 1 ) {
-            x = Inc_T_hys();
-          }
+        case 4:  //DHW_hysteres:
+          if (z == 1) x = Dec_T_hys();
+          if (i == 1) x = Inc_T_hys();
           PrintS_and_D("DHW_hystere:" + String(CWU_HYSTERESIS));
           break;        
-        case 4:  //DHW_time_heat:
+        case 5:  //DHW_time_heat:
           PrintS_and_D("DHW_time_heat:" + String(CWU_MAX_HEATING_TIME / 3600000) + "h");
           break;
-        case 5:  //DHW_time_paus:
+        case 6:  //DHW_time_paus:
           PrintS_and_D("DHW_time_paus:" + String(CWU_INTERVAL / 3600000) + "h");
           break;
-        case 6:  //EEV_setpnt:
-          if ( z == 1 ) {
-            x = Dec_E();
-          }
-          if ( i == 1 ) {
-            x = Inc_E();
-          }
+        case 7:  //EEV_setpnt:
+          if (z == 1) x = Dec_E();
+          if (i == 1) x = Inc_E();
           PrintS_and_D("EEV_setpnt:" + String(T_EEV_setpoint));
           break;
-        case 7:  //HP_CH_state:    Tryb Pracy: 0 = Grzanie centralnego ogrzewanie wyłączone, 1 = włączone
-          // HP_CH_state = z == 1 ? 0 : 1;
-          PrintS_and_D("HP_CH_state:"); // + String(HP_CH_state));
+        case 8:  //HP_CH_state: Grzanie zima/lato
+          {
+            if (heatpump_state == 0) {               
+              if (z == 1) EEPROM.write(0x1d, 0);
+              if (i == 1) EEPROM.write(0x1d, 1);
+              String workMode = (EEPROM.read(0x1d) == 0 ? "WTR" : "SMR");
+              PrintS_and_D("HP_CH_state:" + workMode);
+            } else {
+            PrintS_and_D("Only in stanby mode");
+            }
+          }
           break;
-        case 8:  //HP_DHW_state:   Tryb Pracy: 0 = Grzanie CWU wyłączone, 1 = włączone
-          // HP_DHW_state = z == 1 ? 0 : 1;
-          PrintS_and_D("HP_DHW_state:"); // + String(HP_DHW_state));
+        case 9:  //Buffer_state:
+          {
+          if (z == 1) EEPROM.write(0x13, 0);
+          if (i == 1) EEPROM.write(0x13, 1);
+          String workMode = (EEPROM.read(0x13) == 0 ? "NO" : "YES");
+          PrintS_and_D("HP_buffer:" + workMode);
+          }
           break;
-        case 9:  //HP_4D_valve: 0x11      Czy pompa ciepła posiada zawór rewersyjny 4-drogowy, 0 - nie, 1 - tak
-          // HP_4D_valve = z == 1 ? 0 : 1;
-          PrintS_and_D("HP_4D_valve:"); // + String(HP_4D_valve));
+        case 10:  //HP_4D_valve:
+          {
+          String valveState = (EEPROM.read(0x11) == 0 ? "NO" : "YES");
+          PrintS_and_D("HP_4D_valve:" + valveState);
+          }
           break;
-        case 10:  //HP_work_mode: Work mode: Tryb pracy: Grzanie = 0, Chłodzenie i Grzanie = 1 (tylko jeśli 0x11 == 1)    // w przypadku działania trybu chłodzenia i konieczności nagrzania CWU, pompa ciepła musi się zatrzymać, odczekać 3 minuty, przełączyć się na „grzanie”, odczekać 3 minuty i start
-          // HP_work_mode = z == 1 ? 0 : 1;
-          PrintS_and_D("HP_work_mode:"); // + String(HP_work_mode));
+        case 11:  //HP_work_mode:
+          {
+          if ( EEPROM.read(0x11) == 1 ) {
+              if (z == 1) EEPROM.write(0x12, 0);
+              if (i == 1) EEPROM.write(0x12, 1);
+          }
+          String workMode = (EEPROM.read(0x12) == 0 ? "HTG" : "CLG");
+          PrintS_and_D("HP_work_mode:" + workMode);
+          }
           break;
-    } 
+        case 12:  //MAX_WATTS:
+          if (z == 1) c_wattage_max -= 100;
+          if (i == 1) c_wattage_max += 100;
+          c_workingOK_wattage_min = c_wattage_max * 0.3;
+          PrintS_and_D("Max_Watts:" + String(c_wattage_max));
+          break;
+        case 13:  //RESET SYSTEMU
+          {
+            PrintS_and_D("RESET: DOWN key");
+              if (z == 1) {
+                errorcode = ERR_OK;
+                valve_cwu_position = false;
+                heatpump_state = 0;
+                millis_last_heatpump_on = 0;
+                millis_last_heatpump_off = 0;
+                cold_wp_stop_after = millis() + 15000UL;
+                // compressor_start_after = millis() + 180000UL;
+                PrintS_and_D("RESET done");
+              }
+            }
+          break;
+      }
+    
     delay(300);
-    if ( m == 1 ) {
-      menu_pos = (menu_pos + 1) % 10;  // Cykliczna zmiana trybu (0-9)
-    }
 #else
     if ( z == 1 ) {
       T_EEV_setpoint -= 0.25;
@@ -2042,8 +2113,8 @@ void loop(void) {
     PrintS_and_D("New EEV Td: " + String(T_EEV_setpoint));
     delay(300);
 #endif
-  }
-
+}
+  
 #endif
   //----------------------------- buttons processing END
 
@@ -2112,6 +2183,12 @@ void loop(void) {
     SaveDataEE();
 
     //----------------------------- read important data from eeprom
+    eeprom_addr = 0x1d;
+    HP_CH_state = EEPROM.read(eeprom_addr);   //  Central Heating state: 0 - Winter, 1 - Summer
+    eeprom_addr = 0x14;
+    DHW_support_state = EEPROM.read(eeprom_addr);   //  DHW state: 0 - No, 1 - Yes
+    eeprom_addr = 0x13;
+    buffer_support_state = EEPROM.read(eeprom_addr);
     eeprom_addr = 0x12;
     work_mode_state = EEPROM.read(eeprom_addr);   //  Work mode: Tryb pracy: Grzanie = 0, Chłodzenie = 1 (tylko jeśli 0x11 == 1)
     if ( work_mode_state == 1 ) {
@@ -2247,130 +2324,110 @@ void loop(void) {
     //v1.1 algo
     //
 
-    T_EEV_modificator = (  Tho.e == 1 && Tho.T > 40.0  ) ? ( -1.0 ) : ( 0.0 );  // T_EEV_modificator added to decrease T_EEV_setpoint by 1K when Tho > 40'C
-    
-    if ( errorcode == 0 && async_wattage > c_workingOK_wattage_min && EEV_cur_pos > 0 ) {
-      T_EEV_dt = (valve4w_state == 0) ? (Tae.T - Tbe.T) : (Tac.T - Tbc.T);
+T_EEV_modificator = (Tho.e == 1 && Tho.T > 40.0) ? -1.0 : 0.0;
+
+bool shouldClose = T_EEV_dt < (T_EEV_setpoint + T_EEV_modificator);
+bool shouldOpen = T_EEV_dt > (T_EEV_setpoint + T_EEV_modificator);
+bool emergClose = T_EEV_dt < ((T_EEV_setpoint + T_EEV_modificator) - EEV_EMERG_DIFF);
+bool fastOpen = T_EEV_dt > (T_EEV_setpoint + T_EEV_modificator + EEV_HYSTERESIS + EEV_PRECISE_START);
+
+if (errorcode == 0 && async_wattage > c_workingOK_wattage_min && EEV_cur_pos > 0) {
+  T_EEV_dt = (valve4w_state == 0) ? (Tae.T - Tbe.T) : (Tac.T - Tbc.T);
 #ifdef EEV_DEBUG
-      PrintS("EEV Td: " + String(T_EEV_dt));
+  PrintS("EEV Td: " + String(T_EEV_dt));
 #endif
-      if ( EEV_apulses >= 0 && EEV_cur_pos >= EEV_MINWORKPOS) {
-        if (T_EEV_dt  < (( T_EEV_setpoint + T_EEV_modificator ) - EEV_EMERG_DIFF) ) {       //emerg!
+
+  if (EEV_apulses >= 0 && EEV_cur_pos >= EEV_MINWORKPOS) {
+    if (emergClose) {
+      EEV_apulses = -1; EEV_adonotcare = 0; EEV_fast = 1;
 #ifdef EEV_DEBUG
-          PrintS(F("EEV: 1 emergency closing!"));
+      PrintS(F("EEV: 1 emergency closing!"));
 #endif
-          EEV_apulses = -1;
-          EEV_adonotcare = 0;
-          EEV_fast = 1;
-        } else if (T_EEV_dt  < ( T_EEV_setpoint + T_EEV_modificator )) {          //too
+    } else if (shouldClose) {
+      EEV_apulses = -1; EEV_adonotcare = 0; EEV_fast = 0;
 #ifdef EEV_DEBUG
-          PrintS(F("EEV: 2 closing"));
+      PrintS(F("EEV: 2 closing"));
 #endif
-          //EEV_apulses = -EEV_NONPRECISE_STEPS;
-          EEV_apulses = -1;
-          EEV_adonotcare = 0;
-          EEV_fast = 0;
-        }
-        //faster open when needed, condition copypasted (see EEV_apulses <= 0)
-        if (T_EEV_dt  > ( T_EEV_setpoint + T_EEV_modificator ) + EEV_HYSTERESIS + EEV_PRECISE_START) {    //very
+    } else if (fastOpen) {
+      EEV_adonotcare = 0; EEV_fast = 1;
 #ifdef EEV_DEBUG
-          PrintS(F("EEV: 3 enforce faster opening"));
+      PrintS(F("EEV: 3 enforce faster opening"));
 #endif
-          //EEV_apulses =  +EEV_NONPRECISE_STEPS;
-          //EEV_apulses =  +1;
-          EEV_adonotcare = 0;
-          EEV_fast = 1;
-        }
-      }
-      if ( EEV_apulses <= 0 ) {
-        if (T_EEV_dt  > ( T_EEV_setpoint + T_EEV_modificator ) + EEV_HYSTERESIS + EEV_PRECISE_START) {    //very
-#ifdef EEV_DEBUG
-          PrintS(F("EEV: 4 fast opening"));
-#endif
-          //EEV_apulses =  +EEV_NONPRECISE_STEPS;
-          EEV_apulses =  +1;
-          EEV_adonotcare = 0;
-          EEV_fast = 1;
-        } else if (T_EEV_dt > ( T_EEV_setpoint + T_EEV_modificator ) + EEV_HYSTERESIS) {      //too
-#ifdef EEV_DEBUG
-          PrintS(F("EEV: 5 opening"));
-#endif
-          EEV_apulses =  +1;
-          EEV_adonotcare = 0;
-          EEV_fast = 0;
-        } else if (T_EEV_dt  > ( T_EEV_setpoint + T_EEV_modificator )) {          //ok
-#ifdef EEV_DEBUG
-          PrintS(F("EEV: 6 OK"));
-#endif
-          //
-        }
-        //faster closing when needed, condition copypasted (see EEV_apulses >= 0)
-        if (T_EEV_dt  < (( T_EEV_setpoint + T_EEV_modificator ) - EEV_EMERG_DIFF) ) {       //emerg!
-#ifdef EEV_DEBUG
-          PrintS(F("EEV: 7 enforce faster closing!"));
-#endif
-          //EEV_apulses = -EEV_EMERG_STEPS;
-          EEV_adonotcare = 0;
-          EEV_fast = 1;
-        }
-      }
-      off_EEV();
     }
-    if ( EEV_apulses == 0 ) {
-      if (  ((async_wattage < c_workingOK_wattage_min) && ((unsigned long)(millis_now - millis_eev_last_close) > EEV_CLOSEEVERY))   ||  millis_eev_last_close == 0  ) { //close every 24h by default
+  }
+
+  if (EEV_apulses <= 0) {
+    if (fastOpen) {
+      EEV_apulses = 1; EEV_adonotcare = 0; EEV_fast = 1;
 #ifdef EEV_DEBUG
-        PrintS(F("EEV: 10 FULL closing"));
+      PrintS(F("EEV: 4 fast opening"));
 #endif
-        if ( millis_eev_last_close != 0 ) {
-          EEV_apulses =  -(EEV_cur_pos + EEV_CLOSE_ADD_PULSES);
-        } else {
-          EEV_apulses =  -(EEV_MAXPULSES + EEV_CLOSE_ADD_PULSES);
-        }
-        EEV_adonotcare = 1;
-        EEV_fast = 1;
-        //delay(EEV_STOP_HOLD);
-        millis_eev_last_close = millis_now;
-      } else if (errorcode != 0 || async_wattage < c_workingOK_wattage_min) {   //err or sleep
-        if (EEV_cur_pos > 0  && EEV_cur_pos > EEV_OPEN_AFTER_CLOSE) { //waiting pos. set
+    } else if (shouldOpen && T_EEV_dt > (T_EEV_setpoint + T_EEV_modificator + EEV_HYSTERESIS)) {
+      EEV_apulses = 1; EEV_adonotcare = 0; EEV_fast = 0;
 #ifdef EEV_DEBUG
-          PrintS(F("EEV: 11 close before open"));
+      PrintS(F("EEV: 5 opening"));
 #endif
-          EEV_apulses =  -(EEV_cur_pos + EEV_CLOSE_ADD_PULSES);
-          EEV_adonotcare = 1;
-          EEV_fast = 1;
-        }
-      }
-      off_EEV();
-    }
-    if ( EEV_apulses == 0 && async_wattage < c_workingOK_wattage_min && EEV_cur_pos < EEV_OPEN_AFTER_CLOSE) {
+    } else if (shouldOpen) {
 #ifdef EEV_DEBUG
-      PrintS(F("EEV: 12 full close protection"));
+      PrintS(F("EEV: 6 OK"));
 #endif
-      if (EEV_OPEN_AFTER_CLOSE != 0) {        //full close protection
-        EEV_apulses = EEV_OPEN_AFTER_CLOSE - EEV_cur_pos;
-        EEV_adonotcare = 0;
-        EEV_fast = 1;
-      }
-      off_EEV();
     }
-    if ( EEV_apulses == 0 && async_wattage >= c_workingOK_wattage_min && EEV_cur_pos < EEV_MINWORKPOS) {
+
+    if (emergClose) {
+      EEV_adonotcare = 0; EEV_fast = 1;
 #ifdef EEV_DEBUG
-      PrintS(F("EEV: 13 open to work"));
+      PrintS(F("EEV: 7 enforce faster closing!"));
 #endif
-      if (EEV_MINWORKPOS != 0) {          //full close protection
-        EEV_apulses = EEV_MINWORKPOS - EEV_cur_pos;
-        EEV_adonotcare = 0;
-        EEV_fast = 1;
-      }
-      off_EEV();
     }
-    if (  ((unsigned long)(millis_now - millis_eev_last_on) > 10000)  ||  millis_eev_last_on == 0 ) {
-      //PrintS_and_D("EEV: ON/OFF");
-      on_EEV();
-      delay(30);
-      off_EEV();  //off_EEV called everywhere takes care of it
-      millis_eev_last_on  =  millis_now;
+  }
+
+  off_EEV();
+}
+
+if (EEV_apulses == 0) {
+  bool timeToClose = (async_wattage < c_workingOK_wattage_min && (millis_now - millis_eev_last_close > EEV_CLOSEEVERY)) || millis_eev_last_close == 0;
+  if (timeToClose) {
+    EEV_apulses = -(millis_eev_last_close ? EEV_cur_pos : EEV_MAXPULSES) - EEV_CLOSE_ADD_PULSES;
+    EEV_adonotcare = 1; EEV_fast = 1;
+    millis_eev_last_close = millis_now;
+#ifdef EEV_DEBUG
+    PrintS(F("EEV: 10 FULL closing"));
+#endif
+  } else if (errorcode != 0 || async_wattage < c_workingOK_wattage_min) {
+    if (EEV_cur_pos > EEV_OPEN_AFTER_CLOSE) {
+      EEV_apulses = -(EEV_cur_pos + EEV_CLOSE_ADD_PULSES);
+      EEV_adonotcare = 1; EEV_fast = 1;
+#ifdef EEV_DEBUG
+      PrintS(F("EEV: 11 close before open"));
+#endif
     }
+  }
+  off_EEV();
+}
+
+if (EEV_apulses == 0) {
+  if (async_wattage < c_workingOK_wattage_min && EEV_cur_pos < EEV_OPEN_AFTER_CLOSE && EEV_OPEN_AFTER_CLOSE != 0) {
+    EEV_apulses = EEV_OPEN_AFTER_CLOSE - EEV_cur_pos;
+    EEV_adonotcare = 0; EEV_fast = 1;
+#ifdef EEV_DEBUG
+    PrintS(F("EEV: 12 full close protection"));
+#endif
+    off_EEV();
+  } else if (async_wattage >= c_workingOK_wattage_min && EEV_cur_pos < EEV_MINWORKPOS && EEV_MINWORKPOS != 0) {
+    EEV_apulses = EEV_MINWORKPOS - EEV_cur_pos;
+    EEV_adonotcare = 0; EEV_fast = 1;
+#ifdef EEV_DEBUG
+    PrintS(F("EEV: 13 open to work"));
+#endif
+    off_EEV();
+  }
+}
+
+if ((millis_now - millis_eev_last_on > 10000) || millis_eev_last_on == 0) {
+  on_EEV(); delay(30); off_EEV();
+  millis_eev_last_on = millis_now;
+}
+
 #endif
     //-------------- EEV cycle END
 
@@ -2410,6 +2467,22 @@ void loop(void) {
     // W trybie chłodzenie pompa obiegowa górnego źródla chodzi non stop! <- Temat do zrobienia!!!
     //
 
+    // Procedura awaryjna gdy użytkownik grzebie w menu XD
+    //
+    // Awaryjne zatrzymanie sprężarki, jeśli cwu_heating_state jest aktywne, ale użytkownik wyłączy DHW
+    if (cwu_heating_state == 1  &&  DHW_support_state == 0) {
+        heatpump_state = 0;
+    //    millis_last_heatpump_on = millis_now;
+        if (coldside_circle_state == 1) {
+            cold_wp_stop_after = (unsigned long)(millis_now + COLD_WP_DELAY);
+        }
+        cwu_heating_state = false;
+        valve_cwu_position = false;
+        #ifdef RS485_HUMAN
+          PrintS(F("!!! Aborted! DHW_support_stat disabled"));
+        #endif
+    }
+
     // Zachować kolejność procedur!
     //
     // START pompy głębinowej
@@ -2432,7 +2505,7 @@ void loop(void) {
           ( (Tsump.e == 1   && Tsump.T > cT_sump_min)   || (Tsump.e ^ 1)) &&
           ( (Tsump.e == 1   && Tsump.T < cT_sump_max)   || (Tsump.e ^ 1)) &&
           //t1_sump > t2_cold_in   && ???
-          ( ( work_mode_state == 0 ? (Ttarget.T < T_setpoint) : (Ttarget.T > T_setpoint_cooling ) ) || cwu_heating_state ) &&   //sprawdzamy warunki dla grzanie/chłodzenie
+          ( (HP_CH_state == 0) ? ((work_mode_state == 0 ? (Ttarget.T < T_setpoint) : (Ttarget.T > T_setpoint_cooling)) || (cwu_heating_state)) : (cwu_heating_state)) &&
           ( (Tae.e == 1   && Tae.T > cT_after_evaporator_min) || (Tae.e ^ 1)) &&
           ( (Tbc.e == 1   && Tbc.T < cT_before_condenser_max)   || (Tbc.e ^ 1)) &&
           ( (Tci.e == 1   && Tci.T > cT_cold_min)     || (Tci.e ^ 1)) &&
@@ -2451,18 +2524,20 @@ void loop(void) {
     //
     //stop if
     //    ( (last_off > N) and (t watertank > target) )
-    if ( heatpump_state == 1     &&     ((unsigned long)(millis_now - millis_last_heatpump_off) > mincycle_poweron)    &&
-#ifndef BUFFER_SUPPORT
-    ( ( work_mode_state == 0 ? (Ttarget.T > T_setpoint) : (Ttarget.T < T_setpoint_cooling ) ) &&  !cwu_heating_state) ) {    //sprawdzamy warunki dla grzanie/chłodzenie bez bufora
-#else
-    ( ( work_mode_state == 0 ? (Ts2.T > T_setpoint) : (Ts2.T < T_setpoint_cooling ) ) &&  !cwu_heating_state) ) {    //sprawdzamy warunki dla grzanie/chłodzenie z buforem
-#endif
-#ifdef RS485_HUMAN
-      PrintS(F("Normal Compressor stop"));
-#endif
-      millis_last_heatpump_on = millis_now;
-      cold_wp_stop_after = (unsigned long)(millis_now + COLD_WP_DELAY);    // ustawiamy opóźnienie dla wyłączenia pompy głębinowej
-      heatpump_state = 0;
+    if (heatpump_state == 1 && ((unsigned long)(millis_now - millis_last_heatpump_off) > mincycle_poweron)) {
+        if ((buffer_support_state == 0 &&
+             (work_mode_state == 0 ? (Ttarget.T > T_setpoint) : (Ttarget.T < T_setpoint_cooling)) && 
+             !cwu_heating_state) || 
+            (buffer_support_state == 1 &&
+             (work_mode_state == 0 ? (Ts2.T > T_setpoint) : (Ts2.T < T_setpoint_cooling)) && 
+             !cwu_heating_state)) {
+    #ifdef RS485_HUMAN
+            PrintS(F("Normal Compressor stop"));
+    #endif
+            millis_last_heatpump_on = millis_now;
+            cold_wp_stop_after = (unsigned long)(millis_now + COLD_WP_DELAY); // ustawiamy opóźnienie dla wyłączenia pompy głębinowej
+            heatpump_state = 0;
+        }
     }
 
     //
@@ -2528,7 +2603,7 @@ void loop(void) {
             (Tci.e  == 1  &&  Tci.T   < cT_cold_min )         ||
             (Tco.e  == 1  &&  Tco.T   < cT_cold_min) )     ) {
 #ifdef RS485_HUMAN
-      PrintS(F("Protective stop"));
+      PrintS(F("!!! Protective stop"));
 #endif
       millis_last_heatpump_on = millis_now;
       cold_wp_stop_after = (unsigned long)(millis_now + COLD_WP_DELAY);    // ustawiamy opóźnienie dla wyłączenia pompy głębinowe
@@ -2570,12 +2645,11 @@ void loop(void) {
       //digitalWrite(RELAY_HEATPUMP, heatpump_state); // old, now halifised
     }
 
-#ifdef  CWU_SUPPORT
     //
     // Sprawdzenie warunków do rozpoczęcia grzania CWU lub wymuszenia grzania
     if (!cwu_heating_state) {
-      if (Tcwu.e == 1   && Tcwu.T < 32.0) {
-        // Warunek awaryjny: wymuszone grzanie, gdy Tcwu < 32°C
+      if (Tcwu.e == 1   &&  Tcwu.T < 32.0  &&  DHW_support_state == 1) {
+        // Warunek awaryjny: wymuszone grzanie, gdy Tcwu < 32°C i DHW_support_state
         cwu_heating_state = true;   // Status granie CWU włączone
         millis_cwu_heating_start = millis_now;
         valve_cwu_position = true;  // Przełączamy zawór trójdrogowy na tryb CWU
@@ -2584,8 +2658,8 @@ void loop(void) {
         PrintS(F("Emergency CWU heating started"));
 #endif
 
-      } else if (  ( (millis_now - millis_last_cwu_heating > CWU_INTERVAL) || millis_last_cwu_heating == 0 ) && (Tcwu.e == 1   && Tcwu.T < T_TARGET_CWU - CWU_HYSTERESIS)) {
-        // Normalne grzanie: jeśli minęły co najmniej 2 godziny od ostatniego grzania i Tcwu < T_TARGET_CWU - CWU_HYSTERESIS
+      } else if (  ( (millis_now - millis_last_cwu_heating > CWU_INTERVAL) || millis_last_cwu_heating == 0 ) && (Tcwu.e == 1   &&  Tcwu.T < T_TARGET_CWU - CWU_HYSTERESIS  &&  DHW_support_state == 1)) {
+        // Normalne grzanie: jeśli DHW_support_state i minęły co najmniej 2 godziny od ostatniego grzania i Tcwu < T_TARGET_CWU - CWU_HYSTERESIS
         cwu_heating_state = true;   // Status granie CWU włączone
         millis_cwu_heating_start = millis_now;
         valve_cwu_position = true;  // Przełączamy zawór trójdrogowy na tryb CWU
@@ -2598,17 +2672,19 @@ void loop(void) {
 
     // Sprawdzanie, czy grzanie CWU jest aktywne i czy nie minęła maksymalna godzina grzania
     // lub czy temperatura CWU osiągnęła 40°C
-    if (cwu_heating_state && ((millis_now - millis_cwu_heating_start > CWU_MAX_HEATING_TIME) || (Tcwu.e == 1   && Tcwu.T >= T_TARGET_CWU + CWU_HYSTERESIS))) {
-      // Zakończ grzanie CWU po godzinie lub jeśli Tcwu >= T_TARGET_CWU + CWU_HYSTERESIS
-      cwu_heating_state = false;    // Status grzanie CWU wyłączone
-      millis_last_cwu_heating = millis_now;  // Zapisujemy czas zakończenia grzania
-      valve_cwu_position = false;  // Przełączamy zawór trójdrogowy z powrotem na ogrzewanie domu
+    if (cwu_heating_state && 
+        (DHW_support_state == 0 ||
+         (millis_now - millis_cwu_heating_start > CWU_MAX_HEATING_TIME) || 
+         (Tcwu.e == 1 && Tcwu.T >= T_TARGET_CWU + CWU_HYSTERESIS))) {  
+      // Zakończ grzanie CWU (wyłączone wsparcie, osiągnięty czas lub temperatura)
+      cwu_heating_state = false;    // Status grzania CWU wyłączony
+      millis_last_cwu_heating = millis_now;  // Zapisz czas zakończenia grzania
+      valve_cwu_position = false;  // Przełącz zawór trójdrogowy na ogrzewanie domu
 
 #ifdef RS485_HUMAN
-      PrintS(F("Ending CWU heating - temperature reached or time limit"));
+      PrintS(F("Zakonczenie grzania CWU - wyłączone wsparcie/osiągnięta temp./limit czasu"));
 #endif
     }
-#endif
 
     //
     // STOP pompy ciepła po dowolnym błędzie
@@ -2751,7 +2827,6 @@ void loop(void) {
         case 0x2D:      //-
           Dec_T();
           break;
-#ifdef  CWU_SUPPORT
         case 0x28:      //(     T_TARGET_CWU
           Dec_T_cwu();
           break;
@@ -2764,7 +2839,6 @@ void loop(void) {
         case 0x2a:      //*     CWU_HYSTERESIS
           Inc_T_hys();
           break;
-#endif
         case 0x3C:      //<
           Dec_E();
           break;
